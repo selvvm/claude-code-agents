@@ -1,0 +1,259 @@
+{
+  "tools": [
+    {
+      "name": "TeamCreate",
+      "description": "Creates a new agent team. Writes config.json and task directory to disk. Always the first call in a team session.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["team_name"],
+        "additionalProperties": false,
+        "properties": {
+          "team_name": {
+            "type": "string",
+            "description": "Name for the new team to create."
+          },
+          "description": {
+            "type": "string",
+            "description": "Team description/purpose."
+          },
+          "agent_type": {
+            "type": "string",
+            "description": "Type/role of the team lead (e.g., \"researcher\", \"test-runner\"). Used for team file and inter-agent coordination."
+          }
+        }
+      }
+    },
+    {
+      "name": "TaskCreate",
+      "description": "Creates a new task in the shared team task list. Each task is persisted as a JSON file on disk under ~/.claude/tasks/{team-name}/. The description acts as the agent's prompt.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["subject", "description"],
+        "additionalProperties": false,
+        "properties": {
+          "subject": {
+            "type": "string",
+            "description": "Short (1-5 word) title of the task, used for quick scanning in TaskList."
+          },
+          "description": {
+            "type": "string",
+            "description": "Full task details — effectively the prompt the assigned agent will read and act on."
+          },
+          "activeForm": {
+            "type": "string",
+            "description": "Present continuous form shown in the UI spinner when the task is in_progress (e.g. \"Reviewing auth module...\")."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Agent name to pre-assign the task to. Leave blank for self-claiming by teammates."
+          },
+          "blockedBy": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "List of task IDs that must complete before this task becomes available."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Optional arbitrary metadata attached to the task."
+          }
+        }
+      }
+    },
+    {
+      "name": "TaskList",
+      "description": "Returns all tasks in the team's task list with their current status, owner, and subject. Deliberately omits description/metadata to avoid context bloat — use TaskGet for full details. Teammates call this to find available (pending, unowned, unblocked) work.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["pending", "in_progress", "completed", "deleted"],
+            "description": "Optional filter: return only tasks with this status."
+          }
+        }
+      }
+    },
+    {
+      "name": "TaskGet",
+      "description": "Retrieves the full details of a specific task, including its description, metadata, blockedBy/blocks arrays, and all other fields omitted by TaskList.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["taskId"],
+        "additionalProperties": false,
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "The ID of the task to retrieve."
+          }
+        }
+      }
+    },
+    {
+      "name": "TaskUpdate",
+      "description": "Updates an existing task. Used to claim tasks (set owner + in_progress), complete them, set dependencies, or soft-delete them.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["taskId"],
+        "additionalProperties": false,
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "The ID of the task to update."
+          },
+          "status": {
+            "anyOf": [
+              { "type": "string", "enum": ["pending", "in_progress", "completed"] },
+              { "type": "string", "const": "deleted" }
+            ],
+            "description": "New status for the task."
+          },
+          "subject": {
+            "type": "string",
+            "description": "New subject for the task."
+          },
+          "description": {
+            "type": "string",
+            "description": "New description for the task."
+          },
+          "activeForm": {
+            "type": "string",
+            "description": "Present continuous form shown in spinner when in_progress."
+          },
+          "owner": {
+            "type": "string",
+            "description": "New owner for the task (agent name)."
+          },
+          "addBlockedBy": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Task IDs to add as blockers. Automatically unblocks when those tasks complete."
+          },
+          "removeBlockedBy": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Task IDs to remove from the blockedBy list."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Updated metadata for the task."
+          }
+        }
+      }
+    },
+    {
+      "name": "TeamDelete",
+      "description": "Cleans up the team after all teammates have shut down. Atomically removes the team config, all task files, all inbox files, and the lock file from disk. Always the last call in a team session.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "SendMessage",
+      "description": "Inter-agent messaging. Writes to the recipient's inbox file on disk. Supports direct messages, broadcasts, shutdown coordination, and plan approval flows.",
+      "schema": {
+        "type": "object",
+        "required": ["type"],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "message",
+              "broadcast",
+              "shutdown_request",
+              "shutdown_response",
+              "plan_approval_response"
+            ],
+            "description": "Message type."
+          },
+          "recipient": {
+            "type": "string",
+            "description": "Agent name of the recipient. Required for: message, shutdown_request, plan_approval_response."
+          },
+          "content": {
+            "type": "string",
+            "description": "Message text, reason, or feedback."
+          },
+          "summary": {
+            "type": "string",
+            "description": "A 5-10 word summary shown as a preview in the UI. Required for: message, broadcast."
+          },
+          "approve": {
+            "type": "boolean",
+            "description": "Whether to approve the request. Required for: shutdown_response, plan_approval_response."
+          },
+          "request_id": {
+            "type": "string",
+            "description": "The request ID to respond to. Required for: shutdown_response, plan_approval_response."
+          }
+        }
+      }
+    },
+    {
+      "name": "Agent",
+      "description": "Spawns a subagent or teammate. KEY DISTINCTION: include both `name` + `team_name` to spawn a TEAMMATE (joins the team, sees shared task list, can message others). Omit them to spawn a plain SUBAGENT (isolated, reports back to parent only).",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["description", "prompt", "subagent_type"],
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "A short (1-5 word) label for the task this agent will perform."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The full task/instructions for the agent to perform."
+          },
+          "subagent_type": {
+            "type": "string",
+            "description": "The type of specialized agent to use (e.g. \"general-purpose\", \"Explore\", \"Plan\")."
+          },
+          "name": {
+            "type": "string",
+            "description": "Identity name for the spawned agent — used for messaging. Required to make it a teammate."
+          },
+          "team_name": {
+            "type": "string",
+            "description": "Team to join. This is what makes it a teammate vs a sub-agent."
+          },
+          "model": {
+            "type": "string",
+            "enum": ["sonnet", "opus", "haiku"],
+            "description": "Optional model override. Common pattern: lead on opus, teammates on sonnet."
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["acceptEdits", "bypassPermissions", "default", "dontAsk", "plan"],
+            "description": "Permission mode for the teammate."
+          },
+          "run_in_background": {
+            "type": "boolean",
+            "description": "Set true to run in background (typical for teammates so the lead isn't blocked)."
+          },
+          "max_turns": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Maximum agentic turns before the agent stops."
+          },
+          "resume": {
+            "type": "string",
+            "description": "Agent ID to resume a previous teammate session."
+          }
+        }
+      }
+    }
+  ]
+}
